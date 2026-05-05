@@ -65,6 +65,20 @@ app.use((req, res, next) => {
   next()
 })
 
+/* Add this before your other routes */
+app.get('/', (req, res) => {
+  res.json({
+    name:    'The Grand Library API',
+    version: '1.0.0',
+    status:  'running',
+    docs: {
+      books:  '/api/books',
+      auth:   '/api/auth',
+      users:  '/api/users',
+      health: '/api/health',
+    }
+  })
+})
 
 /* ─────────────────────────────────
    ROUTES
@@ -148,4 +162,16 @@ app.listen(PORT, () => {
   console.log(`   Running at: http://localhost:${PORT}`)
   console.log(`   Environment: ${process.env.NODE_ENV}`)
   console.log(`   Health check: http://localhost:${PORT}/api/health\n`)
+})
+
+const startKeepAlive = require('./utils/keepAlive')
+
+/* Add at the bottom of server.js after app.listen */
+app.listen(PORT, () => {
+  console.log(`📚 Server running at http://localhost:${PORT}`)
+
+  /* Start keep-alive only in production */
+  if (process.env.NODE_ENV === 'production') {
+    startKeepAlive('https://grand-library-server.onrender.com')
+  }
 })
