@@ -1,35 +1,32 @@
 /* ================================
-   routes/users.js
-   User profile, character,
-   favourites, and reading history.
+   routes/users.js — Complete Version
+   Real MongoDB operations for
+   character, favourites, history,
+   and reading progress.
    ================================ */
 
-const express = require('express')
-const router  = express.Router()
+const express          = require('express')
+const router           = express.Router()
+const User             = require('../models/User')
+const ReadingProgress  = require('../models/ReadingProgress')
+const { protect }      = require('../middleware/auth')
+
+/*
+  All user routes require authentication.
+  We apply the protect middleware to the entire router
+  so every route in this file is protected.
+*/
+router.use(protect)
 
 
 /* ─────────────────────────────────
-   GET /api/users/:id/character
-   Get a user's chosen character.
+   GET /api/users/profile
+   Get the logged in user's full profile.
    ───────────────────────────────── */
 
-router.get('/:id/character', async (req, res, next) => {
+router.get('/profile', async (req, res, next) => {
   try {
-    const { id } = req.params
-
-    /*
-      TODO: Fetch from MongoDB in Lesson 16
-    */
-
-    res.json({
-      userId:    id,
-      character: {
-        name:  "The Scholar",
-        emoji: "🧙",
-      },
-      message: 'Character endpoint ready — MongoDB coming in Lesson 16'
-    })
-
+    res.json({ user: req.user.toSafeObject() })
   } catch (error) {
     next(error)
   }
@@ -37,14 +34,13 @@ router.get('/:id/character', async (req, res, next) => {
 
 
 /* ─────────────────────────────────
-   PUT /api/users/:id/character
-   Update a user's chosen character.
+   PATCH /api/users/character
+   Update the user's chosen character.
    Body: { name, emoji }
    ───────────────────────────────── */
 
-router.put('/:id/character', async (req, res, next) => {
+router.patch('/character', async (req, res, next) => {
   try {
-    const { id }          = req.params
     const { name, emoji } = req.body
 
     if (!name || !emoji) {
@@ -53,10 +49,20 @@ router.put('/:id/character', async (req, res, next) => {
       })
     }
 
+    /*
+      findByIdAndUpdate finds a document by ID and updates it.
+      { new: true } returns the updated document instead of old.
+      { runValidators: true } runs schema validation on the update.
+    */
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      { character: { name, emoji } },
+      { new: true, runValidators: true }
+    )
+
     res.json({
       message:   'Character updated successfully',
-      userId:    id,
-      character: { name, emoji },
+      character: user.character,
     })
 
   } catch (error) {
@@ -66,18 +72,28 @@ router.put('/:id/character', async (req, res, next) => {
 
 
 /* ─────────────────────────────────
-   GET /api/users/:id/favourites
-   Get a user's favourite books.
+   PATCH /api/users/preferences
+   Update reading preferences.
+   Body: { theme, fontSize }
    ───────────────────────────────── */
 
-router.get('/:id/favourites', async (req, res, next) => {
+router.patch('/preferences', async (req, res, next) => {
   try {
-    const { id } = req.params
+    const { theme, fontSize } = req.body
+
+    const updates = {}
+    if (theme)    updates['preferences.theme']    = theme
+    if (fontSize) updates['preferences.fontSize'] = fontSize
+
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      { $set: updates },
+      { new: true }
+    )
 
     res.json({
-      userId:     id,
-      favourites: [],
-      message:    'Favourites endpoint ready — MongoDB coming in Lesson 16'
+      message:     'Preferences updated',
+      preferences: user.preferences,
     })
 
   } catch (error) {
@@ -87,14 +103,31 @@ router.get('/:id/favourites', async (req, res, next) => {
 
 
 /* ─────────────────────────────────
-   POST /api/users/:id/favourites
+   GET /api/users/favourites
+   Get all favourite books.
+   ───────────────────────────────── */
+
+router.get('/favourites', async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id)
+      .select('favourites')
+
+    res.json({ favourites: user.favourites })
+
+  } catch (error) {
+    next(error)
+  }
+})
+
+
+/* ─────────────────────────────────
+   POST /api/users/favourites
    Add a book to favourites.
    Body: { bookId, title, cover }
    ───────────────────────────────── */
 
-router.post('/:id/favourites', async (req, res, next) => {
+router.post('/favourites', async (req, res, next) => {
   try {
-    const { id }                  = req.params
     const { bookId, title, cover } = req.body
 
     if (!bookId || !title) {
@@ -103,10 +136,41 @@ router.post('/:id/favourites', async (req, res, next) => {
       })
     }
 
+    /*
+      Check if already favourited.
+      We use the some() method on the favourites array.
+    */
+    const user = await User.findById(req.user._id)
+
+    const alreadyFavourited = user.favourites.some(
+      f => f.bookId === Number(bookId)
+    )
+
+    if (alreadyFavourited) {
+      return res.status(409).json({
+        error: 'Book is already in your favourites'
+      })
+    }
+
+    /*
+      $push adds an item to an array field.
+      This is more efficient than pulling the entire
+      document, pushing in JavaScript, and saving.
+    */
+    await User.findByIdAndUpdate(
+      req.user._id,
+      {
+        $push: {
+          favourites: {
+            $each:     [{ bookId: Number(bookId), title, cover }],
+            $position: 0, /* add to the beginning of array */
+          }
+        }
+      }
+    )
+
     res.status(201).json({
-      message: 'Book added to favourites',
-      userId:  id,
-      book:    { bookId, title, cover },
+      message: `"${title}" added to favourites`,
     })
 
   } catch (error) {
@@ -116,18 +180,94 @@ router.post('/:id/favourites', async (req, res, next) => {
 
 
 /* ─────────────────────────────────
-   DELETE /api/users/:id/favourites/:bookId
+   DELETE /api/users/favourites/:bookId
    Remove a book from favourites.
    ───────────────────────────────── */
 
-router.delete('/:id/favourites/:bookId', async (req, res, next) => {
+router.delete('/favourites/:bookId', async (req, res, next) => {
   try {
-    const { id, bookId } = req.params
+    const { bookId } = req.params
+
+    /*
+      $pull removes all items from an array
+      that match the given condition.
+    */
+    await User.findByIdAndUpdate(
+      req.user._id,
+      {
+        $pull: {
+          favourites: { bookId: Number(bookId) }
+        }
+      }
+    )
+
+    res.json({ message: 'Book removed from favourites' })
+
+  } catch (error) {
+    next(error)
+  }
+})
+
+
+/* ─────────────────────────────────
+   GET /api/users/history
+   Get reading history (most recent first).
+   ───────────────────────────────── */
+
+router.get('/history', async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id)
+      .select('readingHistory')
+
+    res.json({ history: user.readingHistory })
+
+  } catch (error) {
+    next(error)
+  }
+})
+
+
+/* ─────────────────────────────────
+   POST /api/users/history
+   Add or update a book in history.
+   Body: { bookId, title, cover }
+   ───────────────────────────────── */
+
+router.post('/history', async (req, res, next) => {
+  try {
+    const { bookId, title, cover } = req.body
+
+    if (!bookId || !title) {
+      return res.status(400).json({
+        error: 'bookId and title are required'
+      })
+    }
+
+    const user = await User.findById(req.user._id)
+
+    /*
+      Remove existing entry for this book if it exists.
+      Then add it to the front — creates "most recently read" order.
+    */
+    user.readingHistory = user.readingHistory.filter(
+      h => h.bookId !== Number(bookId)
+    )
+
+    user.readingHistory.unshift({
+      bookId: Number(bookId),
+      title,
+      cover,
+      readAt: new Date(),
+    })
+
+    /* Keep only the 20 most recently read books */
+    user.readingHistory = user.readingHistory.slice(0, 20)
+
+    await user.save()
 
     res.json({
-      message: 'Book removed from favourites',
-      userId:  id,
-      bookId,
+      message: 'Reading history updated',
+      history: user.readingHistory,
     })
 
   } catch (error) {
@@ -137,18 +277,70 @@ router.delete('/:id/favourites/:bookId', async (req, res, next) => {
 
 
 /* ─────────────────────────────────
-   GET /api/users/:id/history
-   Get reading history.
+   GET /api/users/progress/:bookId
+   Get reading progress for one book.
    ───────────────────────────────── */
 
-router.get('/:id/history', async (req, res, next) => {
+router.get('/progress/:bookId', async (req, res, next) => {
   try {
-    const { id } = req.params
+    const { bookId } = req.params
+
+    const progress = await ReadingProgress.findOne({
+      user:   req.user._id,
+      bookId: Number(bookId),
+    })
 
     res.json({
-      userId:  id,
-      history: [],
-      message: 'History endpoint ready — MongoDB coming in Lesson 16'
+      currentPage: progress?.currentPage || 0,
+      totalPages:  progress?.totalPages  || 0,
+    })
+
+  } catch (error) {
+    next(error)
+  }
+})
+
+
+/* ─────────────────────────────────
+   PUT /api/users/progress/:bookId
+   Save reading progress for one book.
+   Body: { currentPage, totalPages, bookTitle }
+   ───────────────────────────────── */
+
+router.put('/progress/:bookId', async (req, res, next) => {
+  try {
+    const { bookId }                       = req.params
+    const { currentPage, totalPages, bookTitle } = req.body
+
+    /*
+      findOneAndUpdate with upsert:true means:
+      Find a matching document and update it.
+      If no matching document exists, CREATE a new one.
+      This is called an "upsert" — update or insert.
+      Perfect for progress tracking — works whether the
+      user has read this book before or not.
+    */
+    const progress = await ReadingProgress.findOneAndUpdate(
+      {
+        user:   req.user._id,
+        bookId: Number(bookId),
+      },
+      {
+        currentPage,
+        totalPages,
+        bookTitle,
+        lastReadAt: new Date(),
+      },
+      {
+        new:    true,
+        upsert: true, /* create if not exists */
+      }
+    )
+
+    res.json({
+      message:    'Progress saved',
+      currentPage: progress.currentPage,
+      totalPages:  progress.totalPages,
     })
 
   } catch (error) {

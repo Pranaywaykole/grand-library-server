@@ -8,6 +8,7 @@
   Must be called before anything else that needs
   environment variables.
 */
+const connectDatabase = require('./config/database')
 require('dotenv').config()
 
 const express = require('express')
@@ -79,6 +80,7 @@ app.get('/', (req, res) => {
     }
   })
 })
+connectDatabase()
 
 /* ─────────────────────────────────
    ROUTES
@@ -89,9 +91,9 @@ app.get('/', (req, res) => {
   Each file handles a group of related routes.
   We will create these files shortly.
 */
-const bookRoutes      = require('./routes/books')
-const authRoutes      = require('./routes/auth')
-const userRoutes      = require('./routes/users')
+const bookRoutes = require('./routes/books')
+const authRoutes = require('./routes/auth')
+const userRoutes = require('./routes/users')
 
 /*
   Mount the routes on specific base paths.
