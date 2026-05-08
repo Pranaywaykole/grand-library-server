@@ -144,6 +144,9 @@ async function saveBooksToDatabase(books) {
 
   return { saved, skipped };
 }
+/* ─────────────────────────────────
+   This main just joking
+   ───────────────────────────────── */
 
 /* ─────────────────────────────────
    MAIN SEED FUNCTION
